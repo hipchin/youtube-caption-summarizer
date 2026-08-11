@@ -313,6 +313,8 @@ export default {
         throw new UserFacingError("リクエストの形式が正しくありません。", 400);
       }
 
+      const mode = payload && payload.mode === "transcript" ? "transcript" : "summary";
+
       const youtubeUrl = validateYouTubeUrl(payload && payload.url);
 
       const transcript = await fetchTranscript(youtubeUrl, env);
@@ -323,11 +325,15 @@ export default {
         );
       }
 
-      const summary = await summarizeWithClaude(transcript.content, env);
+      const summary =
+        mode === "transcript"
+          ? transcript.content
+          : await summarizeWithClaude(transcript.content, env);
 
       return jsonResponse(
         {
           ok: true,
+          mode,
           summary,
           transcriptLang: transcript.lang,
           availableLangs: transcript.availableLangs,

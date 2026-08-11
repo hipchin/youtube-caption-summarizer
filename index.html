@@ -35,6 +35,33 @@
     font-size: 1.4rem;
     margin-bottom: 4px;
   }
+  h1 button {
+    all: unset;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    color: inherit;
+  }
+  h1 button:hover {
+    color: var(--accent);
+  }
+  .mode-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 14px;
+    font-size: 0.9rem;
+  }
+  .mode-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 400;
+    margin-bottom: 0;
+    cursor: pointer;
+  }
+  .mode-row input[type="radio"] {
+    accent-color: var(--accent);
+  }
   p.lead {
     color: var(--muted);
     margin-top: 0;
@@ -187,7 +214,7 @@
 </head>
 <body>
 <div class="container">
-  <h1>YouTube字幕要約</h1>
+  <h1><button id="title-btn" type="button">YouTube字幕要約</button></h1>
   <p class="lead">YouTube動画のURLを入力すると、字幕を取得してClaudeが日本語で要約します。</p>
 
   <div class="card">
@@ -202,6 +229,10 @@
       />
       <button id="submit-btn" type="button">要約する</button>
     </div>
+    <div class="mode-row">
+      <label><input type="radio" name="mode" value="summary" checked /> 要約</label>
+      <label><input type="radio" name="mode" value="transcript" /> 全文文字起こし</label>
+    </div>
     <div class="status" id="status">
       <span class="spinner" aria-hidden="true"></span>
       <span id="status-text">字幕を取得して要約しています…</span>
@@ -211,7 +242,7 @@
 
   <div class="card result-card" id="result-card">
     <div class="result-header">
-      <h2>要約結果</h2>
+      <h2 id="result-title">要約結果</h2>
       <button class="copy-btn" id="copy-btn" type="button">コピー</button>
     </div>
     <textarea id="result" readonly></textarea>
@@ -223,15 +254,32 @@
   // Cloudflare Worker のURLをここに設定してください。
   const WORKER_URL = "https://youtube-caption-summarizer.tackro-i.workers.dev";
 
+  const titleBtn = document.getElementById("title-btn");
   const urlInput = document.getElementById("url-input");
   const submitBtn = document.getElementById("submit-btn");
+  const modeRadios = document.querySelectorAll('input[name="mode"]');
   const statusEl = document.getElementById("status");
   const statusText = document.getElementById("status-text");
   const errorEl = document.getElementById("error");
   const resultCard = document.getElementById("result-card");
+  const resultTitle = document.getElementById("result-title");
   const resultEl = document.getElementById("result");
   const metaEl = document.getElementById("meta");
   const copyBtn = document.getElementById("copy-btn");
+
+  function getMode() {
+    return document.querySelector('input[name="mode"]:checked').value;
+  }
+
+  function updateSubmitLabel() {
+    submitBtn.textContent = getMode() === "transcript" ? "文字起こしを取得する" : "要約する";
+  }
+  modeRadios.forEach((r) => r.addEventListener("change", updateSubmitLabel));
+  updateSubmitLabel();
+
+  titleBtn.addEventListener("click", () => {
+    window.location.reload();
+  });
 
   function setLoading(isLoading) {
     submitBtn.disabled = isLoading;
@@ -262,6 +310,7 @@
 
   async function handleSubmit() {
     const url = urlInput.value.trim();
+    const mode = getMode();
     clearError();
     resultCard.classList.remove("visible");
 
@@ -276,13 +325,14 @@
     }
 
     setLoading(true);
-    statusText.textContent = "字幕を取得して要約しています…";
+    statusText.textContent =
+      mode === "transcript" ? "字幕を取得しています…" : "字幕を取得して要約しています…";
 
     try {
       const res = await fetch(WORKER_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, mode }),
       });
 
       let data;
@@ -293,9 +343,10 @@
       }
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "要約に失敗しました。");
+        throw new Error(data.error || "取得に失敗しました。");
       }
 
+      resultTitle.textContent = mode === "transcript" ? "文字起こし全文" : "要約結果";
       showResult(data.summary, data.transcriptLang, data.availableLangs);
     } catch (err) {
       showError(err.message || "通信エラーが発生しました。しばらくしてから再試行してください。");
