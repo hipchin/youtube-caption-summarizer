@@ -1,0 +1,7 @@
+# ローカル開発用の環境変数サンプル。
+# コピーして `.dev.vars` を作成し、実際の値を入れてください。
+# `.dev.vars` はGitにコミットしないでください（.gitignoreで除外済み）。
+
+SUPADATA_API_KEY=your_supadata_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+ALLOWED_ORIGIN=http://localhost:8788
