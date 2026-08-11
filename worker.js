@@ -1,8 +1,8 @@
 /**
- * Cloudflare Worker: YouTube caption summarizer backend.
+ * Cloudflare Worker: video caption summarizer backend.
  *
- * Flow: validate YouTube URL -> fetch transcript from Supadata ->
- * summarize with Claude -> return JSON to the frontend.
+ * Flow: validate video URL (YouTube / TikTok / Instagram / X / Facebook) ->
+ * fetch transcript from Supadata -> summarize with Claude -> return JSON to the frontend.
  *
  * Required secrets (set with `wrangler secret put <NAME>`):
  *   - SUPADATA_API_KEY
@@ -46,19 +46,26 @@ function jsonResponse(body, status, env) {
   });
 }
 
-function isAllowedYouTubeHost(hostname) {
+// Domains Supadata's /v1/transcript endpoint can fetch captions/transcripts from.
+const ALLOWED_VIDEO_DOMAINS = [
+  "youtube.com",
+  "youtu.be",
+  "tiktok.com",
+  "instagram.com",
+  "twitter.com",
+  "x.com",
+  "facebook.com",
+  "fb.watch",
+];
+
+function isAllowedVideoHost(hostname) {
   const h = hostname.toLowerCase();
-  return (
-    h === "youtube.com" ||
-    h.endsWith(".youtube.com") ||
-    h === "youtu.be" ||
-    h.endsWith(".youtu.be")
-  );
+  return ALLOWED_VIDEO_DOMAINS.some((domain) => h === domain || h.endsWith(`.${domain}`));
 }
 
-function validateYouTubeUrl(rawUrl) {
+function validateVideoUrl(rawUrl) {
   if (typeof rawUrl !== "string" || rawUrl.trim() === "") {
-    throw new UserFacingError("YouTube動画のURLを入力してください。", 400);
+    throw new UserFacingError("動画のURLを入力してください。", 400);
   }
   let parsed;
   try {
@@ -69,9 +76,9 @@ function validateYouTubeUrl(rawUrl) {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new UserFacingError("URLの形式が正しくありません。", 400);
   }
-  if (!isAllowedYouTubeHost(parsed.hostname)) {
+  if (!isAllowedVideoHost(parsed.hostname)) {
     throw new UserFacingError(
-      "YouTubeの動画URLのみ対応しています（youtube.com / youtu.be）。",
+      "対応していないサイトのURLです（YouTube / TikTok / Instagram / X（Twitter）/ Facebookに対応）。",
       400
     );
   }
@@ -142,9 +149,9 @@ async function pollSupadataJob(jobId, apiKey) {
   );
 }
 
-async function fetchTranscript(youtubeUrl, env) {
+async function fetchTranscript(videoUrl, env) {
   const params = new URLSearchParams();
-  params.set("url", youtubeUrl);
+  params.set("url", videoUrl);
   params.set("text", "true");
   params.set("mode", "native");
 
@@ -315,9 +322,9 @@ export default {
 
       const mode = payload && payload.mode === "transcript" ? "transcript" : "summary";
 
-      const youtubeUrl = validateYouTubeUrl(payload && payload.url);
+      const videoUrl = validateVideoUrl(payload && payload.url);
 
-      const transcript = await fetchTranscript(youtubeUrl, env);
+      const transcript = await fetchTranscript(videoUrl, env);
       if (!transcript.content) {
         throw new UserFacingError(
           "この動画の字幕が見つかりませんでした。字幕が存在しない動画の可能性があります。",

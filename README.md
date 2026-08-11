@@ -1,6 +1,6 @@
-# YouTube字幕要約アプリ
+# 動画字幕要約アプリ
 
-YouTube動画のURLを入力すると、字幕を取得してClaude APIで日本語要約するシングルページアプリです。
+動画のURL（YouTube / TikTok / Instagram / X（Twitter）/ Facebook）を入力すると、字幕を取得してClaude APIで日本語要約するシングルページアプリです。
 
 - フロントエンド: `index.html`（GitHub Pagesでホスティング）
 - バックエンド: `worker.js`（Cloudflare Worker）

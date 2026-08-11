@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>YouTube字幕要約</title>
+<title>動画字幕要約</title>
 <link rel="icon" href="icon-512.png" type="image/png" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <style>
@@ -229,17 +229,17 @@
 </head>
 <body>
 <div class="container">
-  <h1><button id="title-btn" type="button">YouTube字幕要約</button></h1>
-  <p class="lead">YouTube動画のURLを入力すると、字幕を取得してClaudeが日本語で要約します。</p>
+  <h1><button id="title-btn" type="button">動画字幕要約</button></h1>
+  <p class="lead">動画のURL（YouTube / TikTok / Instagram / X / Facebook）を入力すると、字幕を取得してClaudeが日本語で要約します。</p>
 
   <div class="card">
-    <label for="url-input">YouTube動画のURL</label>
+    <label for="url-input">動画のURL</label>
     <div class="input-row">
       <input
         id="url-input"
         type="url"
         inputmode="url"
-        placeholder="https://www.youtube.com/watch?v=..."
+        placeholder="https://www.youtube.com/watch?v=... など"
         autocomplete="off"
       />
       <button id="submit-btn" type="button">要約する</button>
@@ -339,7 +339,7 @@
     resultCard.classList.remove("visible");
 
     if (!url) {
-      showError("YouTube動画のURLを入力してください。");
+      showError("動画のURLを入力してください。");
       return;
     }
 
