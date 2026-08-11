@@ -192,6 +192,21 @@
     font-family: inherit;
     background: transparent;
     color: inherit;
+    transition: min-height 0.15s ease;
+  }
+  .result-card.expanded textarea#result {
+    min-height: 75vh;
+  }
+  .expand-btn {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    font-size: 0.85rem;
+  }
+  .expand-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .meta {
     margin-top: 8px;
@@ -243,7 +258,10 @@
   <div class="card result-card" id="result-card">
     <div class="result-header">
       <h2 id="result-title">要約結果</h2>
-      <button class="copy-btn" id="copy-btn" type="button">コピー</button>
+      <div style="display:flex; gap:8px;">
+        <button class="expand-btn" id="expand-btn" type="button">大きく表示</button>
+        <button class="copy-btn" id="copy-btn" type="button">コピー</button>
+      </div>
     </div>
     <textarea id="result" readonly></textarea>
     <div class="meta" id="meta"></div>
@@ -266,6 +284,12 @@
   const resultEl = document.getElementById("result");
   const metaEl = document.getElementById("meta");
   const copyBtn = document.getElementById("copy-btn");
+  const expandBtn = document.getElementById("expand-btn");
+
+  expandBtn.addEventListener("click", () => {
+    const expanded = resultCard.classList.toggle("expanded");
+    expandBtn.textContent = expanded ? "元のサイズに戻す" : "大きく表示";
+  });
 
   function getMode() {
     return document.querySelector('input[name="mode"]:checked').value;
