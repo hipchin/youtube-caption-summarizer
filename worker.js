@@ -51,9 +51,10 @@ function assertAllowedOrigin(request, env) {
   }
 }
 
-async function enforceRateLimit(env, mode) {
+async function enforceRateLimit(request, env, mode) {
   if (!env.RATE_LIMITER) return;
-  const key = mode === "transcript" ? "transcript" : "summary";
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const key = `${mode === "transcript" ? "transcript" : "summary"}:${ip}`;
   const { success } = await env.RATE_LIMITER.limit({ key });
   if (!success) {
     throw new UserFacingError(
@@ -334,7 +335,7 @@ async function summarizeWithClaude(transcript, env) {
         },
       ],
       env,
-      900
+      1500
     );
     partialSummaries.push(`### パート ${i + 1}\n${partial}`);
   }
@@ -377,7 +378,7 @@ export default {
       }
 
       const mode = payload && payload.mode === "transcript" ? "transcript" : "summary";
-      await enforceRateLimit(env, mode);
+      await enforceRateLimit(request, env, mode);
 
       const videoUrl = validateVideoUrl(payload && payload.url);
       const transcript = await fetchTranscript(videoUrl, env);
