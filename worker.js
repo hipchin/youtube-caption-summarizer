@@ -318,7 +318,7 @@ async function summarizeWithClaude(transcript, env) {
     const summary = await callClaude(
       [{ role: "user", content: finalSummaryPrompt(chunks[0]) }],
       env,
-      2200
+      4096
     );
     return wasClipped
       ? `${summary}\n\n注：字幕が非常に長いため、先頭${MAX_TRANSCRIPT_CHARS.toLocaleString()}文字を対象に要約しています。`
@@ -349,7 +349,7 @@ async function summarizeWithClaude(transcript, env) {
       },
     ],
     env,
-    2400
+    6000
   );
 
   return wasClipped
