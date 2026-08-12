@@ -378,9 +378,10 @@ export default {
       }
 
       const mode = payload && payload.mode === "transcript" ? "transcript" : "summary";
+      const videoUrl = validateVideoUrl(payload && payload.url);
+
       await enforceRateLimit(request, env, mode);
 
-      const videoUrl = validateVideoUrl(payload && payload.url);
       const transcript = await fetchTranscript(videoUrl, env);
 
       if (!transcript.content) {
