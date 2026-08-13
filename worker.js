@@ -1,21 +1,15 @@
 /**
  * Cloudflare Worker: video caption summarizer backend.
  *
- * Flow: validate video URL (YouTube / TikTok / Instagram / X / Facebook) ->
- * fetch transcript from Supadata -> summarize with Claude -> return JSON to the frontend.
- *
- * Required secrets (set with `wrangler secret put <NAME>`):
- *   - SUPADATA_API_KEY
- *   - ANTHROPIC_API_KEY
- *
- * Required var (in wrangler.toml [vars] or dashboard):
- *   - ALLOWED_ORIGIN  e.g. "https://hipchin.github.io"
+ * Flow: validate origin + rate limit -> validate video URL ->
+ * fetch transcript from Supadata -> summarize with Claude -> return JSON.
  */
 
 const SUPADATA_TRANSCRIPT_URL = "https://api.supadata.ai/v1/transcript";
 const CLAUDE_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_MODEL = "claude-sonnet-4-6";
-const MAX_TRANSCRIPT_CHARS = 80000;
+const MAX_TRANSCRIPT_CHARS = 160000;
+const CHUNK_SIZE_CHARS = 28000;
 const POLL_INTERVAL_MS = 1000;
 const MAX_POLL_MS = 60000;
 
@@ -41,12 +35,35 @@ function jsonResponse(body, status, env) {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
       ...corsHeaders(env),
     },
   });
 }
 
-// Domains Supadata's /v1/transcript endpoint can fetch captions/transcripts from.
+function assertAllowedOrigin(request, env) {
+  const origin = request.headers.get("Origin");
+  if (!env.ALLOWED_ORIGIN) {
+    throw new UserFacingError("サーバー設定に問題があります。", 500);
+  }
+  if (origin !== env.ALLOWED_ORIGIN) {
+    throw new UserFacingError("このアクセス元からの利用は許可されていません。", 403);
+  }
+}
+
+async function enforceRateLimit(request, env, mode) {
+  if (!env.RATE_LIMITER) return;
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const key = `${mode === "transcript" ? "transcript" : "summary"}:${ip}`;
+  const { success } = await env.RATE_LIMITER.limit({ key });
+  if (!success) {
+    throw new UserFacingError(
+      "短時間にリクエストが集中しています。1分ほど待ってから再試行してください。",
+      429
+    );
+  }
+}
+
 const ALLOWED_VIDEO_DOMAINS = [
   "youtube.com",
   "youtu.be",
@@ -87,9 +104,7 @@ function validateVideoUrl(rawUrl) {
 
 function extractSupadataContent(data) {
   const content = data && data.content;
-  if (typeof content === "string") {
-    return content;
-  }
+  if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content.map((item) => (item && item.text) || "").join("\n");
   }
@@ -119,18 +134,14 @@ async function pollSupadataJob(jobId, apiKey) {
   const start = Date.now();
   while (Date.now() - start < MAX_POLL_MS) {
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-
     const res = await fetch(`${SUPADATA_TRANSCRIPT_URL}/${encodeURIComponent(jobId)}`, {
       method: "GET",
       headers: { "x-api-key": apiKey },
     });
-
     if (!res.ok) {
       throw new UserFacingError(supadataHttpErrorMessage(res.status), 502);
     }
-
     const data = await res.json();
-
     if (data.status === "completed") {
       return {
         content: extractSupadataContent(data),
@@ -141,7 +152,6 @@ async function pollSupadataJob(jobId, apiKey) {
     if (data.status === "failed") {
       throw new UserFacingError("字幕の取得に失敗しました。", 502);
     }
-    // status is likely "processing" / "queued" -> keep polling
   }
   throw new UserFacingError(
     "処理に時間がかかっています。短い動画で試すか、しばらくしてから再試行してください。",
@@ -175,9 +185,7 @@ async function fetchTranscript(videoUrl, env) {
     } catch {
       throw new UserFacingError("字幕の取得に失敗しました。", 502);
     }
-    if (!data.jobId) {
-      throw new UserFacingError("字幕の取得に失敗しました。", 502);
-    }
+    if (!data.jobId) throw new UserFacingError("字幕の取得に失敗しました。", 502);
     return pollSupadataJob(data.jobId, env.SUPADATA_API_KEY);
   }
 
@@ -226,34 +234,7 @@ function claudeHttpErrorMessage(status) {
   }
 }
 
-async function summarizeWithClaude(transcript, env) {
-  let truncated = false;
-  let text = transcript;
-  if (text.length > MAX_TRANSCRIPT_CHARS) {
-    text = text.slice(0, MAX_TRANSCRIPT_CHARS);
-    truncated = true;
-  }
-
-  const body = {
-    model: CLAUDE_MODEL,
-    max_tokens: 2000,
-    system:
-      "あなたは優秀な学習アシスタントです。与えられた動画の字幕テキストを読み、指定形式で日本語要約してください。",
-    messages: [
-      {
-        role: "user",
-        content: `以下はYouTube動画の字幕テキストです。次の形式で日本語要約してください。
-
-①動画の主題を1〜2文で述べる
-②重要なポイントを箇条書きで5〜10項目
-③学習上の気づきや応用できる点を2〜3文で述べる
-
-字幕テキスト：
-${text}`,
-      },
-    ],
-  };
-
+async function callClaude(messages, env, maxTokens) {
   let res;
   try {
     res = await fetch(CLAUDE_URL, {
@@ -263,7 +244,13 @@ ${text}`,
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: maxTokens,
+        system:
+          "あなたは動画内容を正確に整理する学習アシスタントです。字幕にない事実を動画内の発言として補わず、事実とAIによる補足を明確に分けてください。",
+        messages,
+      }),
     });
   } catch {
     throw new UserFacingError(
@@ -283,36 +270,106 @@ ${text}`,
     throw new UserFacingError("要約の生成に失敗しました。", 502);
   }
 
-  const summary = (data.content || [])
+  const text = (data.content || [])
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("\n");
 
-  if (!summary) {
-    throw new UserFacingError("要約の生成に失敗しました。", 502);
+  if (!text) throw new UserFacingError("要約の生成に失敗しました。", 502);
+  return text;
+}
+
+function splitTranscript(text) {
+  const chunks = [];
+  for (let i = 0; i < text.length; i += CHUNK_SIZE_CHARS) {
+    chunks.push(text.slice(i, i + CHUNK_SIZE_CHARS));
+  }
+  return chunks;
+}
+
+function finalSummaryPrompt(sourceText) {
+  return `以下の動画内容を、日本語で次の形式に整理してください。
+
+## 概要
+動画の主題を1〜2文で述べる。
+
+## 重要ポイント
+動画内で述べられている重要事項を5〜10項目の箇条書きにする。
+
+## 話者の主張
+話者が特に強調している主張、結論、立場を整理する。
+
+## 具体例
+動画内で使われた具体例、数値、事例があれば整理する。なければ「特になし」とする。
+
+## AIによる補足・応用
+動画内容から考えられる応用や学習上の示唆を2〜3文で述べる。この欄は動画内の発言ではなくAIによる補足であることを明確にする。
+
+動画内容：
+${sourceText}`;
+}
+
+async function summarizeWithClaude(transcript, env) {
+  const clipped = transcript.slice(0, MAX_TRANSCRIPT_CHARS);
+  const wasClipped = transcript.length > MAX_TRANSCRIPT_CHARS;
+  const chunks = splitTranscript(clipped);
+
+  if (chunks.length === 1) {
+    const summary = await callClaude(
+      [{ role: "user", content: finalSummaryPrompt(chunks[0]) }],
+      env,
+      4096
+    );
+    return wasClipped
+      ? `${summary}\n\n注：字幕が非常に長いため、先頭${MAX_TRANSCRIPT_CHARS.toLocaleString()}文字を対象に要約しています。`
+      : summary;
   }
 
-  if (truncated) {
-    return `${summary}\n\n注：動画が長いため、冒頭部分を中心に要約しています`;
+  const partialSummaries = [];
+  for (let i = 0; i < chunks.length; i += 1) {
+    const partial = await callClaude(
+      [
+        {
+          role: "user",
+          content: `以下は1本の動画字幕を${chunks.length}分割したうちの${i + 1}番目です。後で全体要約を作るため、情報を落としすぎずに整理してください。\n\n- 主要な主張\n- 重要な事実・数値・具体例\n- 話の流れ\n- 後続部分との関係がありそうな論点\n\n字幕：\n${chunks[i]}`,
+        },
+      ],
+      env,
+      1500
+    );
+    partialSummaries.push(`### パート ${i + 1}\n${partial}`);
   }
-  return summary;
+
+  const combined = partialSummaries.join("\n\n");
+  const summary = await callClaude(
+    [
+      {
+        role: "user",
+        content: `${finalSummaryPrompt(combined)}\n\n上記の「動画内容」は分割字幕から作成した中間要約です。重複を統合し、動画全体として自然な流れになるようにまとめてください。`,
+      },
+    ],
+    env,
+    6000
+  );
+
+  return wasClipped
+    ? `${summary}\n\n注：字幕が非常に長いため、先頭${MAX_TRANSCRIPT_CHARS.toLocaleString()}文字を対象に分割要約しています。`
+    : summary;
 }
 
 export default {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders(env) });
-    }
-
-    if (request.method !== "POST") {
-      return jsonResponse(
-        { ok: false, error: "許可されていないメソッドです。" },
-        405,
-        env
-      );
-    }
-
     try {
+      assertAllowedOrigin(request, env);
+
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders(env) });
+      }
+
+      if (request.method !== "POST") {
+        return jsonResponse({ ok: false, error: "許可されていないメソッドです。" }, 405, env);
+      }
+
       let payload;
       try {
         payload = await request.json();
@@ -321,10 +378,12 @@ export default {
       }
 
       const mode = payload && payload.mode === "transcript" ? "transcript" : "summary";
-
       const videoUrl = validateVideoUrl(payload && payload.url);
 
+      await enforceRateLimit(request, env, mode);
+
       const transcript = await fetchTranscript(videoUrl, env);
+
       if (!transcript.content) {
         throw new UserFacingError(
           "この動画の字幕が見つかりませんでした。字幕が存在しない動画の可能性があります。",
@@ -352,7 +411,6 @@ export default {
       if (err instanceof UserFacingError) {
         return jsonResponse({ ok: false, error: err.message }, err.status, env);
       }
-      // Unexpected error: never leak internal details.
       return jsonResponse(
         { ok: false, error: "予期しないエラーが発生しました。しばらくしてから再試行してください。" },
         500,

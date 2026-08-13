@@ -13,18 +13,38 @@ APIキーはCloudflare Workerのsecretとしてのみ保持され、フロント
 
 ```
 .
-├── index.html          # フロントエンド（GitHub Pagesに配置）
+├── index.html           # フロントエンド（GitHub Pagesに配置）
 ├── worker.js            # Cloudflare Worker本体
-├── wrangler.toml         # Worker設定（デプロイ先・ALLOWED_ORIGINなど）
-├── .dev.vars.example     # ローカル開発用envのサンプル
+├── wrangler.toml        # Worker設定（CORS / Rate Limiting）
+├── .dev.vars.example    # ローカル開発用envのサンプル
 └── .gitignore
 ```
+
+## セキュリティと利用制限
+
+Workerは次の防御を行います。
+
+1. `Origin` ヘッダーを検査し、`ALLOWED_ORIGIN` と一致しないアクセスを403で拒否する。
+2. Cloudflare WorkersのRate Limiting bindingを利用し、短時間の大量リクエストを429で拒否する。
+3. Supadata / AnthropicのAPIキーはCloudflare Secretにのみ保存する。
+4. 想定外の内部エラー詳細をクライアントへ返さない。
+
+> `Origin` 検査は完全なユーザー認証ではありません。公開範囲をさらに厳密に限定する場合はCloudflare Accessなどの認証機構を追加してください。
+
+## 長い動画の要約
+
+字幕が約28,000文字を超える場合は、字幕を複数パートに分割して中間要約を作成し、それらをClaudeでもう一度統合して全体要約を生成します。
+
+- 分割サイズ: 約28,000文字
+- 要約対象の上限: 160,000文字
+- 160,000文字を超えた場合: 先頭160,000文字を対象にし、その旨を結果末尾に表示
+- 「動画内の内容」と「AIによる補足・応用」を区別して出力
 
 ## 1. Supadata APIキーの取得手順
 
 1. https://supadata.ai/ にアクセスしてアカウントを作成する。
 2. ダッシュボードにログインし、APIキー（`SUPADATA_API_KEY`）を発行する。
-3. 無料枠のリクエスト上限や料金プランを確認しておく（動画の長さ・件数によって消費量が変わります）。
+3. 無料枠のリクエスト上限や料金プランを確認する。
 
 ## 2. Anthropic APIキーの取得手順
 
@@ -36,33 +56,47 @@ APIキーはCloudflare Workerのsecretとしてのみ保持され、フロント
 
 ### 事前準備
 
+Rate Limiting bindingを利用するため、Wrangler 4.36.0以降を使用してください。
+
 ```bash
-npm install -g wrangler
+npm install -g wrangler@latest
+wrangler --version
 wrangler login
 ```
 
 ### `wrangler.toml` の確認
 
-`wrangler.toml` の `ALLOWED_ORIGIN` を、実際にGitHub Pagesを公開するoriginに変更してください。
+`ALLOWED_ORIGIN` を実際にGitHub Pagesを公開するoriginに設定します。
 
 ```toml
 [vars]
 ALLOWED_ORIGIN = "https://hipchin.github.io"
 ```
 
+Rate Limiting bindingは次の設定です。
+
+```toml
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+```
+
+キーは `モード:接続元IP`（例: `summary:203.0.113.1`）で分けており、クライアントごとに独立して10リクエスト/分を目安に制限します。CloudflareのRate Limiting bindingは拠点単位で動作するため、厳密な課金上限としてではなく濫用抑止として使用します。`Origin`検査も同様に、ブラウザ経由のカジュアルな濫用を防ぐためのものであり、本人認証ではありません（curl等での偽装は可能です）。悪用時の最終防衛線は、Anthropic / Supadata側のクレジット上限・自動追加購入オフの設定に置いてください。
+
 ### secretの設定手順（本番）
 
-APIキーは `wrangler.toml` には書かず、必ずWorkerのsecretとして設定します。
+APIキーは `wrangler.toml` には書かず、Workerのsecretとして設定します。
 
 ```bash
 wrangler secret put SUPADATA_API_KEY
-# プロンプトが表示されたらSupadataのAPIキーを貼り付けてEnter
-
 wrangler secret put ANTHROPIC_API_KEY
-# プロンプトが表示されたらAnthropicのAPIキーを貼り付けてEnter
 ```
 
-設定済みのsecret一覧を確認する場合:
+設定済みsecret一覧:
 
 ```bash
 wrangler secret list
@@ -74,11 +108,7 @@ wrangler secret list
 wrangler deploy
 ```
 
-デプロイが完了すると `https://<worker名>.<サブドメイン>.workers.dev` のようなURLが発行されます。このURLをフロントエンドの `WORKER_URL` に設定します。
-
 ## 4. ローカル開発設定（`.dev.vars`）
-
-`wrangler dev` でローカル実行する場合、`.dev.vars.example` をコピーして `.dev.vars` を作成し、実際のAPIキーを入れてください。
 
 ```bash
 cp .dev.vars.example .dev.vars
@@ -98,57 +128,71 @@ ALLOWED_ORIGIN=http://localhost:8788
 wrangler dev
 ```
 
-> **重要:** `.dev.vars` と `.env` はAPIキーなどの機密情報を含むため、**絶対にGitにコミットしないでください**。このリポジトリの `.gitignore` で既に除外されていますが、`git status` で誤ってステージされていないか必ず確認してください。
+> `.dev.vars` と `.env` はAPIキーなどの機密情報を含むため、Gitにコミットしないでください。このリポジトリの `.gitignore` で除外されています。
 
 ## 5. GitHub Pagesへの配置手順
 
-1. `index.html` をリポジトリのルート（または `docs/` フォルダ）に配置する。
+1. `index.html` をリポジトリのルートに配置する。
 2. GitHubリポジトリの `Settings` → `Pages` を開く。
-3. `Source` を `Deploy from a branch` にし、対象ブランチとフォルダ（`/ (root)` または `/docs`）を選択して保存する。
-4. 数分待つと `https://<GitHubユーザー名>.github.io/<リポジトリ名>/` でアプリが公開される。
-5. 公開されたoriginを、Worker側の `ALLOWED_ORIGIN`（`wrangler.toml`）に設定し、再デプロイする。
+3. `Source` を `Deploy from a branch` にし、対象ブランチと `/ (root)` を選択して保存する。
+4. 公開されたoriginをWorker側の `ALLOWED_ORIGIN` に設定する。
+5. Workerを再デプロイする。
 
-## 6. フロントエンド内のWorker URLの変更方法
+## 6. フロントエンド内のWorker URL
 
-`index.html` 内の以下の定数を、デプロイしたWorkerのURLに書き換えてください。
+`index.html` 内の `WORKER_URL` にデプロイ済みWorker URLを設定します。
 
 ```js
-// index.html 内
-const WORKER_URL = "https://your-worker-subdomain.workers.dev";
+const WORKER_URL = "https://youtube-caption-summarizer.tackro-i.workers.dev";
 ```
-
-Worker URLを変更したら、変更後の `index.html` を再度GitHub Pagesへpushしてください。
 
 ## API仕様（概要）
 
-### リクエスト（フロントエンド → Worker）
+### リクエスト
 
-```
+```http
 POST /
 Content-Type: application/json
+Origin: https://hipchin.github.io
 
-{ "url": "https://www.youtube.com/watch?v=..." }
+{ "url": "https://www.youtube.com/watch?v=...", "mode": "summary" }
 ```
 
-### レスポンス（成功時）
+`mode` は `summary` または `transcript` です。
+
+### 成功時
 
 ```json
 {
   "ok": true,
+  "mode": "summary",
   "summary": "Claudeが生成した要約テキスト",
   "transcriptLang": "ja",
   "availableLangs": ["ja", "en"]
 }
 ```
 
-### レスポンス（エラー時）
+### エラー時
 
 ```json
 { "ok": false, "error": "日本語の分かりやすいエラーメッセージ" }
 ```
 
-## 制限事項 / TODO
+主なHTTPステータス:
 
-- 字幕テキストが80,000文字を超える場合、先頭80,000文字のみを要約対象とし、結果末尾に「注：動画が長いため、冒頭部分を中心に要約しています」と付記します。
-- TODO: 将来的には長い動画向けに分割要約に対応する。
-- MVPでは保存機能・ログイン機能・履歴機能は実装していません。
+- `400`: URLやリクエスト形式の不備
+- `403`: 許可されていないOrigin
+- `404`: 字幕なし
+- `405`: POST/OPTIONS以外のメソッド
+- `429`: Rate Limit超過
+- `500`: Worker側の設定不備・想定外の内部エラー
+- `502`: 外部API障害
+- `504`: 字幕取得タイムアウト
+
+## 今後の候補
+
+- Cloudflare Accessによる本人認証
+- 要約形式の選択
+- 履歴保存
+- 動画タイトルやサムネイル表示
+- 長尺動画の上限160,000文字を超える場合の完全分割処理
