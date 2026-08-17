@@ -180,6 +180,17 @@
     background: var(--accent);
     color: #fff;
   }
+  .save-btn {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 8px 14px;
+    font-size: 0.85rem;
+  }
+  .save-btn:hover:not(:disabled) {
+    background: var(--accent);
+    color: #fff;
+  }
   textarea#result {
     width: 100%;
     min-height: 320px;
@@ -262,6 +273,7 @@
       <div style="display:flex; gap:8px;">
         <button class="expand-btn" id="expand-btn" type="button">大きく表示</button>
         <button class="copy-btn" id="copy-btn" type="button">コピー</button>
+        <button class="save-btn" id="save-btn" type="button">Markdown保存</button>
       </div>
     </div>
     <textarea id="result" readonly></textarea>
@@ -285,6 +297,7 @@
   const resultEl = document.getElementById("result");
   const metaEl = document.getElementById("meta");
   const copyBtn = document.getElementById("copy-btn");
+  const saveBtn = document.getElementById("save-btn");
   const expandBtn = document.getElementById("expand-btn");
 
   expandBtn.addEventListener("click", () => {
@@ -322,7 +335,7 @@
     errorEl.classList.remove("visible");
   }
 
-  function showResult(summary, transcriptLang, availableLangs) {
+  function showResult(summary, transcriptLang, availableLangs, mode) {
     resultEl.value = summary;
     resultCard.classList.add("visible");
     const parts = [];
@@ -331,6 +344,7 @@
       parts.push(`利用可能な言語: ${availableLangs.join(", ")}`);
     }
     metaEl.textContent = parts.join(" / ");
+    saveBtn.hidden = mode !== "summary";
   }
 
   async function handleSubmit() {
@@ -372,7 +386,7 @@
       }
 
       resultTitle.textContent = mode === "transcript" ? "文字起こし全文" : "要約結果";
-      showResult(data.summary, data.transcriptLang, data.availableLangs);
+      showResult(data.summary, data.transcriptLang, data.availableLangs, mode);
     } catch (err) {
       showError(err.message || "通信エラーが発生しました。しばらくしてから再試行してください。");
     } finally {
@@ -396,6 +410,38 @@
       resultEl.select();
       document.execCommand("copy");
     }
+  });
+
+  function markdownFileName(markdown) {
+    const frontmatter = markdown.match(/^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/);
+    const titleMatch = frontmatter && frontmatter[1].match(/^title:\s*(.+?)\s*$/m);
+    let title = titleMatch ? titleMatch[1].trim() : "source-note";
+    if (
+      title.length >= 2 &&
+      ((title.startsWith('"') && title.endsWith('"')) ||
+        (title.startsWith("'") && title.endsWith("'")))
+    ) {
+      title = title.slice(1, -1);
+    }
+    const safeTitle = title
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 100);
+    return `${safeTitle || "source-note"}.md`;
+  }
+
+  saveBtn.addEventListener("click", () => {
+    if (!resultEl.value) return;
+    const blob = new Blob([resultEl.value], { type: "text/markdown;charset=utf-8" });
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = markdownFileName(resultEl.value);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(downloadUrl);
   });
 </script>
 </body>

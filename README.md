@@ -1,6 +1,6 @@
 # 動画字幕要約アプリ
 
-動画のURL（YouTube / TikTok / Instagram / X（Twitter）/ Facebook）を入力すると、字幕を取得してClaude APIで日本語要約するシングルページアプリです。
+動画のURL（YouTube / TikTok / Instagram / X（Twitter）/ Facebook）を入力すると、字幕を取得し、Claude APIでObsidian向けSource Noteを生成するシングルページアプリです。
 
 - フロントエンド: `index.html`（GitHub Pagesでホスティング）
 - バックエンド: `worker.js`（Cloudflare Worker）
@@ -39,6 +39,20 @@ Workerは次の防御を行います。
 - 要約対象の上限: 160,000文字
 - 160,000文字を超えた場合: 先頭160,000文字を対象にし、その旨を結果末尾に表示
 - 「動画内の内容」と「AIによる補足・応用」を区別して出力
+
+## Obsidian Source Noteとして保存する
+
+要約モードでは、結果が次の情報を含むFrontmatter付きMarkdownになります。
+
+- `type: source`
+- 内容から生成した`title`と許可語彙から選んだ`topics`
+- `source_type`と元動画の`source_url`
+- 生成日の`date_added`
+- `status: archived`
+
+生成後に「Markdown保存」を押すと、タイトルを基にした`.md`ファイルをダウンロードできます。そのファイルをObsidian Vaultの`20_Sources`へ移動してください。ブラウザからVaultへ直接書き込む機能は含みません。
+
+本文は「概要」「重要ポイント」「根拠・具体例」を必須とし、該当する場合のみ「話者の主張・予測」「自分に関係するポイント」「実践・試したいこと」「疑問・未確認事項」を追加します。全文文字起こしモードは従来どおりで、Markdown保存ボタンは表示しません。
 
 ## 1. Supadata APIキーの取得手順
 
@@ -166,7 +180,7 @@ Origin: https://hipchin.github.io
 {
   "ok": true,
   "mode": "summary",
-  "summary": "Claudeが生成した要約テキスト",
+  "summary": "Frontmatterを含むClaude生成のSource Note Markdown",
   "transcriptLang": "ja",
   "availableLangs": ["ja", "en"]
 }

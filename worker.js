@@ -13,6 +13,20 @@ const CHUNK_SIZE_CHARS = 28000;
 const POLL_INTERVAL_MS = 1000;
 const MAX_POLL_MS = 60000;
 
+const USER_CONTEXT = `情報を単に収集するのではなく、生活・仕事・学習・意思決定に再利用できる知識として蓄積する。
+特定ジャンルに限定せず、新しい視点、根拠、具体例、実践可能性、制約・リスク、既存知識を更新する点を重視する。
+自分との関連性を無理に作らず、事実・話者の意見・AIの考察を区別し、不明な内容は不明のまま扱う。`;
+
+const TOPICS = [
+  "AI", "AIエージェント", "AIモデル", "ChatGPT", "Claude", "Claude Code", "Codex",
+  "ローカルLLM", "AIコーディング", "プロンプト", "API", "個人開発", "Webアプリ",
+  "ローカルアプリ", "GitHub", "n8n", "Google Apps Script", "業務自動化", "仕事術",
+  "生産性", "働き方", "個人ビジネス", "収益化", "ソロプレナー", "家計", "税金",
+  "投資", "経済", "資産形成", "健康", "運動", "筋力トレーニング", "栄養", "睡眠",
+  "食事", "学習", "読書", "心理", "マインドセット", "意思決定", "問題解決",
+  "人間関係", "コミュニケーション",
+];
+
 class UserFacingError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -287,39 +301,79 @@ function splitTranscript(text) {
   return chunks;
 }
 
-function finalSummaryPrompt(sourceText) {
-  return `以下の動画内容を、日本語で次の形式に整理してください。
+function sourceTypeForUrl(videoUrl) {
+  const hostname = new URL(videoUrl).hostname.toLowerCase();
+  if (hostname.includes("youtube") || hostname === "youtu.be") return "YouTube";
+  if (hostname.includes("tiktok")) return "TikTok";
+  if (hostname.includes("instagram")) return "Instagram";
+  if (hostname === "x.com" || hostname.endsWith(".x.com") || hostname.includes("twitter")) return "X";
+  if (hostname.includes("facebook") || hostname === "fb.watch") return "Facebook";
+  return "Video";
+}
 
-## 概要
-動画の主題を1〜2文で述べる。
+function finalSummaryPrompt(sourceText, videoUrl) {
+  const dateAdded = new Date().toISOString().slice(0, 10);
+  return `以下の動画内容から、Obsidianの20_Sourcesに保存する日本語のSource Noteを作成してください。
 
-## 重要ポイント
-動画内で述べられている重要事項を5〜10項目の箇条書きにする。
+ユーザーの情報整理方針:
+${USER_CONTEXT}
 
-## 話者の主張
-話者が特に強調している主張、結論、立場を整理する。
+要約ルール:
+- 元情報にない事実を追加せず、不明な内容を推測で補完しない
+- 主要な結論と、その理解に必要な根拠を対応させる
+- 数値、研究結果、固有名詞、サービス名、事例、手順、条件、例外は重要なら残す
+- 事実と、話者の意見・経験・予測を区別する
+- メリットだけでなく、制約、欠点、リスク、反対材料も残す
+- 情報量を減らすこと自体を目的にせず、重要ポイントの項目数を固定しない
+- 挨拶、宣伝、スポンサー紹介、内容に影響しない雑談、重複は省く
+- 自分との関連性や実践項目は、元情報から自然に導ける場合だけ記載する
+- AI独自の考察を加える場合は「AIによる考察」と明記し、動画由来の内容と混同しない
+- 根拠が弱い主張、情報源不明、古い可能性、検証が必要な内容は「疑問・未確認事項」に分離する
 
-## 具体例
-動画内で使われた具体例、数値、事例があれば整理する。なければ「特になし」とする。
+出力要件:
+- Markdownだけを出力し、コードフェンスや前置きは付けない
+- 先頭に次の形式のYAML Frontmatterを置く
+- titleは内容を端的に表す自然な日本語にする。YAML文字列として必ずダブルクォートで囲む
+- topicsは下記の許可語彙から1〜5個だけ選ぶ。適切な語がない場合は空配列 [] にする
+- Frontmatterの後に同じtitleのH1見出しを置く
+- 「概要」「重要ポイント」「根拠・具体例」は必須とする
+- 「話者の主張・予測」「自分に関係するポイント」「実践・試したいこと」「疑問・未確認事項」は該当内容がある場合だけ追加する
 
-## AIによる補足・応用
-動画内容から考えられる応用や学習上の示唆を2〜3文で述べる。この欄は動画内の発言ではなくAIによる補足であることを明確にする。
+---
+type: source
+title: "内容から生成したタイトル"
+topics:
+  - 許可語彙から選んだトピック
+source_type: ${sourceTypeForUrl(videoUrl)}
+source_url: "${videoUrl.replaceAll('"', "%22")}"
+date_added: ${dateAdded}
+status: archived
+---
 
-動画内容：
+topicsの許可語彙:
+${TOPICS.join("、")}
+
+動画内容:
 ${sourceText}`;
 }
 
-async function summarizeWithClaude(transcript, env) {
+function normalizeSourceNote(markdown) {
+  const trimmed = markdown.trim();
+  const fenced = trimmed.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+async function summarizeWithClaude(transcript, videoUrl, env) {
   const clipped = transcript.slice(0, MAX_TRANSCRIPT_CHARS);
   const wasClipped = transcript.length > MAX_TRANSCRIPT_CHARS;
   const chunks = splitTranscript(clipped);
 
   if (chunks.length === 1) {
-    const summary = await callClaude(
-      [{ role: "user", content: finalSummaryPrompt(chunks[0]) }],
+    const summary = normalizeSourceNote(await callClaude(
+      [{ role: "user", content: finalSummaryPrompt(chunks[0], videoUrl) }],
       env,
       4096
-    );
+    ));
     return wasClipped
       ? `${summary}\n\n注：字幕が非常に長いため、先頭${MAX_TRANSCRIPT_CHARS.toLocaleString()}文字を対象に要約しています。`
       : summary;
@@ -341,16 +395,16 @@ async function summarizeWithClaude(transcript, env) {
   }
 
   const combined = partialSummaries.join("\n\n");
-  const summary = await callClaude(
+  const summary = normalizeSourceNote(await callClaude(
     [
       {
         role: "user",
-        content: `${finalSummaryPrompt(combined)}\n\n上記の「動画内容」は分割字幕から作成した中間要約です。重複を統合し、動画全体として自然な流れになるようにまとめてください。`,
+        content: `${finalSummaryPrompt(combined, videoUrl)}\n\n上記の「動画内容」は分割字幕から作成した中間要約です。重複を統合し、動画全体として自然な流れになるようにまとめてください。`,
       },
     ],
     env,
     6000
-  );
+  ));
 
   return wasClipped
     ? `${summary}\n\n注：字幕が非常に長いため、先頭${MAX_TRANSCRIPT_CHARS.toLocaleString()}文字を対象に分割要約しています。`
@@ -394,7 +448,7 @@ export default {
       const summary =
         mode === "transcript"
           ? transcript.content
-          : await summarizeWithClaude(transcript.content, env);
+          : await summarizeWithClaude(transcript.content, videoUrl, env);
 
       return jsonResponse(
         {
