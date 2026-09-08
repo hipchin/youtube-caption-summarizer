@@ -94,6 +94,30 @@ function isAllowedVideoHost(hostname) {
   return ALLOWED_VIDEO_DOMAINS.some((domain) => h === domain || h.endsWith(`.${domain}`));
 }
 
+function isYouTubeHost(hostname) {
+  const h = hostname.toLowerCase();
+  return h === "youtube.com" || h.endsWith(".youtube.com") || h === "youtu.be" || h.endsWith(".youtu.be");
+}
+
+// Strips playlist/index/timestamp/tracking params (e.g. ?list=WL&index=2) that are
+// irrelevant to caption lookup and occasionally seem to trip up Supadata's URL parsing.
+function normalizeVideoUrl(parsed) {
+  if (!isYouTubeHost(parsed.hostname)) {
+    return parsed.toString();
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host === "youtu.be" || host.endsWith(".youtu.be")) {
+    const id = parsed.pathname.split("/").filter(Boolean)[0];
+    return id ? `https://youtu.be/${id}` : parsed.toString();
+  }
+  if (parsed.pathname === "/watch") {
+    const id = parsed.searchParams.get("v");
+    return id ? `https://www.youtube.com/watch?v=${id}` : parsed.toString();
+  }
+  // /shorts/<id>, /live/<id> etc. - drop any extraneous query string
+  return `${parsed.origin}${parsed.pathname}`;
+}
+
 function validateVideoUrl(rawUrl) {
   if (typeof rawUrl !== "string" || rawUrl.trim() === "") {
     throw new UserFacingError("動画のURLを入力してください。", 400);
@@ -113,7 +137,7 @@ function validateVideoUrl(rawUrl) {
       400
     );
   }
-  return parsed.toString();
+  return normalizeVideoUrl(parsed);
 }
 
 function extractSupadataContent(data) {
