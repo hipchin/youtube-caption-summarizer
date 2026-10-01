@@ -1,0 +1,15 @@
+{
+  "name": "動画字幕要約",
+  "short_name": "字幕要約",
+  "description": "動画のURLから字幕を取得し、全文文字起こしまたは日本語要約を表示します。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F5F5F7",
+  "theme_color": "#F5F5F7",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
