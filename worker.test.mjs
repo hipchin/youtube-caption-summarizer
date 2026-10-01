@@ -64,6 +64,7 @@ test("transcript mode keeps the existing plain transcript response", async (t) =
 
   globalThis.fetch = async (url) => {
     assert.equal(String(url).startsWith("https://api.supadata.ai/"), true);
+    assert.equal(new URL(url).searchParams.get("lang"), "ja");
     return Response.json({ content: "全文文字起こし", lang: "ja", availableLangs: ["ja"] });
   };
 

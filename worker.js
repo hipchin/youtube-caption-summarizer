@@ -202,6 +202,9 @@ async function fetchTranscript(videoUrl, env) {
   params.set("url", videoUrl);
   params.set("text", "true");
   params.set("mode", "native");
+  // Without this Supadata sometimes picks an English track for Japanese videos.
+  // If no Japanese track exists it falls back to the first available language.
+  params.set("lang", "ja");
 
   let res;
   try {

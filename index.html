@@ -486,6 +486,19 @@
     min-height: 75vh;
   }
 
+  .app-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .app-actions .secondary-btn {
+    height: var(--control-touch);
+    padding: 0 var(--space-4);
+    font-size: var(--text-sm);
+  }
+
   .meta {
     margin-top: var(--space-2);
     font-size: var(--text-xs);
@@ -525,17 +538,17 @@
         placeholder="https://www.youtube.com/watch?v=... など"
         autocomplete="off"
       />
-      <button id="submit-btn" type="button">要約する</button>
+      <button id="submit-btn" type="button">文字起こしを取得する</button>
     </div>
 
     <div class="mode-row">
       <div class="segmented" role="radiogroup" aria-label="出力モード">
         <label class="segmented-option">
-          <input type="radio" name="mode" value="summary" checked />
+          <input type="radio" name="mode" value="summary" />
           <span>要約</span>
         </label>
         <label class="segmented-option">
-          <input type="radio" name="mode" value="transcript" />
+          <input type="radio" name="mode" value="transcript" checked />
           <span>全文文字起こし</span>
         </label>
       </div>
@@ -569,6 +582,11 @@
     <div id="result" tabindex="0"></div>
     <div class="meta" id="meta"></div>
   </div>
+
+  <div class="app-actions">
+    <button class="secondary-btn" id="reset-btn" type="button" title="入力・結果・エラー表示をすべて消して初期状態に戻します">すべてリセット</button>
+    <button class="secondary-btn" id="update-btn" type="button" title="キャッシュを使わずに最新版のページを読み込み直します">最新版に更新</button>
+  </div>
 </div>
 
 <script>
@@ -592,8 +610,11 @@
   const expandBtn = document.getElementById("expand-btn");
   const readTimeEl = document.getElementById("read-time");
   const topicsEl = document.getElementById("topics");
+  const resetBtn = document.getElementById("reset-btn");
+  const updateBtn = document.getElementById("update-btn");
 
   let currentRawText = "";
+  let currentRequest = null;
 
   // The summarizer returns an Obsidian Source Note: a YAML frontmatter block
   // (title/topics/...) followed by a redundant H1 and the Markdown body.
@@ -761,10 +782,7 @@
     saveBtn.hidden = mode !== "summary";
   }
 
-  async function handleSubmit() {
-    const url = urlInput.value.trim();
-    const mode = getMode();
-    clearError();
+  function clearResult() {
     resultCard.classList.remove("visible");
     resultCard.classList.remove("expanded");
     expandBtn.textContent = "大きく表示";
@@ -772,6 +790,15 @@
     currentRawText = "";
     topicsEl.hidden = true;
     topicsEl.innerHTML = "";
+    metaEl.textContent = "";
+  }
+
+  async function handleSubmit() {
+    if (currentRequest) return;
+    const url = urlInput.value.trim();
+    const mode = getMode();
+    clearError();
+    clearResult();
 
     if (!url) {
       showError("動画のURLを入力してください。");
@@ -783,6 +810,8 @@
       return;
     }
 
+    const controller = new AbortController();
+    currentRequest = controller;
     setLoading(true);
     statusText.textContent =
       mode === "transcript" ? "字幕を取得しています…" : "字幕を取得して要約しています…";
@@ -792,6 +821,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, mode }),
+        signal: controller.signal,
       });
 
       let data;
@@ -807,11 +837,42 @@
 
       showResult(data.summary, data.transcriptLang, data.availableLangs, mode);
     } catch (err) {
+      if (controller.signal.aborted) return;
       showError(err.message || "通信エラーが発生しました。しばらくしてから再試行してください。");
     } finally {
-      setLoading(false);
+      if (currentRequest === controller) {
+        currentRequest = null;
+        setLoading(false);
+      }
     }
   }
+
+  function resetAll() {
+    const hasWork = currentRequest || currentRawText || urlInput.value.trim();
+    if (hasWork && !window.confirm("入力したURLと結果を消して、最初の状態に戻しますか？")) return;
+    if (currentRequest) {
+      currentRequest.abort();
+      currentRequest = null;
+    }
+    setLoading(false);
+    urlInput.value = "";
+    document.querySelector('input[name="mode"][value="transcript"]').checked = true;
+    updateSubmitLabel();
+    clearError();
+    clearResult();
+    urlInput.focus();
+  }
+
+  resetBtn.addEventListener("click", resetAll);
+
+  // GitHub Pages serves index.html with a short cache; a unique query string
+  // forces the browser to fetch the latest deployed version.
+  updateBtn.addEventListener("click", () => {
+    if (currentRequest && !window.confirm("処理中の結果は失われます。最新版を読み込み直しますか？")) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("v", Date.now().toString());
+    window.location.replace(url.toString());
+  });
 
   submitBtn.addEventListener("click", handleSubmit);
   urlInput.addEventListener("keydown", (e) => {
