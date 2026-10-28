@@ -4,4 +4,5 @@
 
 SUPADATA_API_KEY=your_supadata_api_key_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
+APP_KEY=your_app_passphrase_here
 ALLOWED_ORIGIN=http://localhost:8788

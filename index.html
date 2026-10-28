@@ -177,7 +177,8 @@
     flex-wrap: wrap;
   }
 
-  input[type="url"] {
+  input[type="url"],
+  input[type="password"] {
     flex: 1 1 240px;
     min-width: 0;
     height: var(--control-touch);
@@ -190,7 +191,8 @@
     color: inherit;
   }
 
-  input[type="url"]:focus-visible {
+  input[type="url"]:focus-visible,
+  input[type="password"]:focus-visible {
     outline: 2px solid var(--color-focus);
     outline-offset: 1px;
     border-color: var(--color-focus);
@@ -280,6 +282,16 @@
   .segmented-option input:focus-visible + span {
     outline: 2px solid var(--color-focus);
     outline-offset: 2px;
+  }
+
+  .key-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .key-group[hidden] {
+    display: none;
   }
 
   .hint {
@@ -519,6 +531,10 @@
     .input-row > * {
       width: 100%;
     }
+    /* 縦並びでは flex-basis が高さとして効き、入力欄が240px高くなるため打ち消す */
+    .input-row > input {
+      flex: none;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -559,6 +575,14 @@
           <span>全文文字起こし</span>
         </label>
       </div>
+    </div>
+
+    <div class="key-group" id="key-group" hidden>
+      <label for="key-input">合言葉</label>
+      <div class="input-row">
+        <input id="key-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      </div>
+      <p class="hint">初回だけ入力します。取得に成功するとこの端末に保存されます。</p>
     </div>
 
     <p class="hint">長い動画は要約に時間がかかる場合があります（数分程度）。</p>
@@ -602,6 +626,8 @@
 
   const titleBtn = document.getElementById("title-btn");
   const urlInput = document.getElementById("url-input");
+  const keyGroup = document.getElementById("key-group");
+  const keyInput = document.getElementById("key-input");
   const submitBtn = document.getElementById("submit-btn");
   const modeRadios = document.querySelectorAll('input[name="mode"]');
   const statusEl = document.getElementById("status");
@@ -800,6 +826,47 @@
     metaEl.textContent = "";
   }
 
+  // ---------- 利用の合言葉 ----------
+  // Worker は合言葉(シークレット APP_KEY)がないと動かない。
+  // 初回だけ入力してもらい、取得が通ったらこの端末の localStorage に保存する(配信物には含めない)。
+  const KEY_STORAGE = "appKey";
+
+  function loadKey() {
+    try {
+      return localStorage.getItem(KEY_STORAGE) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function saveKey(key) {
+    try {
+      localStorage.setItem(KEY_STORAGE, key);
+    } catch {
+      // 保存できない環境(プライベートブラウズ等)では、次回また入力してもらう
+    }
+  }
+
+  function forgetKey() {
+    try {
+      localStorage.removeItem(KEY_STORAGE);
+    } catch {
+      // 何もしない
+    }
+  }
+
+  function showKeyField() {
+    keyGroup.hidden = false;
+    keyInput.focus();
+  }
+
+  function hideKeyField() {
+    keyGroup.hidden = true;
+    keyInput.value = "";
+  }
+
+  if (!loadKey()) keyGroup.hidden = false;
+
   async function handleSubmit() {
     if (currentRequest) return;
     const url = urlInput.value.trim();
@@ -817,6 +884,13 @@
       return;
     }
 
+    const key = loadKey() || keyInput.value.trim();
+    if (!key) {
+      showKeyField();
+      showError("合言葉を入力してください。");
+      return;
+    }
+
     const controller = new AbortController();
     currentRequest = controller;
     setLoading(true);
@@ -826,10 +900,21 @@
     try {
       const res = await fetch(WORKER_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-app-key": key },
         body: JSON.stringify({ url, mode }),
         signal: controller.signal,
       });
+
+      if (res.status === 401) {
+        forgetKey();
+        showKeyField();
+        throw new Error("合言葉が違います。入力し直してください。");
+      }
+      // 成功したときだけ保存する(URLの誤りや回数制限は合言葉の確認より前に返るため)
+      if (res.ok && !loadKey()) {
+        saveKey(key);
+        hideKeyField();
+      }
 
       let data;
       try {
@@ -883,6 +968,9 @@
 
   submitBtn.addEventListener("click", handleSubmit);
   urlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") handleSubmit();
+  });
+  keyInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") handleSubmit();
   });
 

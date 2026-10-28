@@ -108,7 +108,10 @@ APIキーは `wrangler.toml` には書かず、Workerのsecretとして設定し
 ```bash
 wrangler secret put SUPADATA_API_KEY
 wrangler secret put ANTHROPIC_API_KEY
+wrangler secret put APP_KEY
 ```
+
+`APP_KEY` は画面で入力する利用の合言葉です。Origin のチェックは curl 等で偽装できるため、合言葉を知っている人だけが有料APIを使えるようにしています。未設定だとWorkerは全リクエストを拒否します。推測されにくい文字列にしてください(例: `openssl rand -base64 18`)。画面では初回だけ入力し、取得に成功するとその端末の localStorage に保存されます。
 
 設定済みsecret一覧:
 
@@ -133,6 +136,7 @@ cp .dev.vars.example .dev.vars
 ```
 SUPADATA_API_KEY=your_supadata_api_key_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
+APP_KEY=your_app_passphrase_here
 ALLOWED_ORIGIN=http://localhost:8788
 ```
 

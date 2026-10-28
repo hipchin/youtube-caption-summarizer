@@ -19,3 +19,4 @@ namespace_id = "1001"
 # 以下はダッシュボードまたは `wrangler secret put` で設定してください（このファイルには書かないでください）。
 # SUPADATA_API_KEY
 # ANTHROPIC_API_KEY
+# APP_KEY(画面で入力する利用の合言葉。未設定だと全リクエストを拒否します)

@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker: video caption summarizer backend.
  *
- * Flow: validate origin + rate limit -> validate video URL ->
+ * Flow: validate origin -> validate video URL -> rate limit -> app key ->
  * fetch transcript from Supadata -> summarize with Claude -> return JSON.
  */
 
@@ -11,6 +11,9 @@ const CLAUDE_MODEL = "claude-sonnet-4-6";
 const MAX_TRANSCRIPT_CHARS = 160000;
 const CHUNK_SIZE_CHARS = 28000;
 const POLL_INTERVAL_MS = 1000;
+// 利用の合言葉(シークレット APP_KEY)を送るヘッダー。Origin は curl 等で偽装できるため、
+// 有料API(Supadata・Claude)を他人に使われないよう、合言葉を知っている人だけに絞る。
+const APP_KEY_HEADER = "x-app-key";
 const MAX_POLL_MS = 60000;
 
 const USER_CONTEXT = `情報を単に収集するのではなく、生活・仕事・学習・意思決定に再利用できる知識として蓄積する。
@@ -38,7 +41,7 @@ function corsHeaders(env) {
   return {
     "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": `Content-Type, ${APP_KEY_HEADER}`,
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
@@ -63,6 +66,28 @@ function assertAllowedOrigin(request, env) {
   if (origin !== env.ALLOWED_ORIGIN) {
     throw new UserFacingError("このアクセス元からの利用は許可されていません。", 403);
   }
+}
+
+// 合言葉はユーザーが端末で一度だけ入力して保存する。配信物・Git・ログには入れない。
+// シークレット未設定のときは受け付けない側に倒す。
+async function assertAppKey(request, env) {
+  if (!env.APP_KEY) {
+    throw new UserFacingError("サーバー設定に問題があります。", 503);
+  }
+  const given = request.headers.get(APP_KEY_HEADER) || "";
+  if (!(await sameSecret(given, env.APP_KEY))) {
+    throw new UserFacingError("合言葉が違います。", 401);
+  }
+}
+
+// 長さや一致した位置が処理時間に出ないよう、ハッシュ同士を定数時間で比べる
+async function sameSecret(a, b) {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  return crypto.subtle.timingSafeEqual(ha, hb);
 }
 
 async function enforceRateLimit(request, env, mode) {
@@ -461,7 +486,9 @@ export default {
       const mode = payload && payload.mode === "transcript" ? "transcript" : "summary";
       const videoUrl = validateVideoUrl(payload && payload.url);
 
+      // 合言葉の総当たりも防ぐため、回数制限を合言葉の確認より前にかける
       await enforceRateLimit(request, env, mode);
+      await assertAppKey(request, env);
 
       const transcript = await fetchTranscript(videoUrl, env);
 
