@@ -107,7 +107,7 @@ async function sameSecret(a, b) {
 async function enforceRateLimit(request, env, mode) {
   if (!env.RATE_LIMITER) return;
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const key = `${mode === "transcript" ? "transcript" : "summary"}:${ip}`;
+  const key = `${mode}:${ip}`;
   const { success } = await env.RATE_LIMITER.limit({ key });
   if (!success) {
     throw new UserFacingError(
@@ -488,6 +488,13 @@ export default {
 
       if (request.method !== "POST") {
         return jsonResponse({ ok: false, error: "許可されていないメソッドです。" }, 405, env);
+      }
+
+      // 画面の「保存」ボタン用。合言葉が正しいかだけを返し、有料APIは呼ばない
+      if (new URL(request.url).pathname === "/api/check-key") {
+        await enforceRateLimit(request, env, "check");
+        await assertAppKey(request, env);
+        return jsonResponse({ ok: true }, 200, env);
       }
 
       let payload;

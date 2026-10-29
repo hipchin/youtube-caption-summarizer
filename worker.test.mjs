@@ -151,3 +151,24 @@ test("accepts a Japanese app key sent URI-encoded", async (t) => {
   assert.equal((await worker.fetch(request("transcript", encodeURIComponent("にほんごの合言葉")), okEnv)).status, 200);
   assert.equal((await worker.fetch(request("transcript", encodeURIComponent("ちがう合言葉")), okEnv)).status, 401);
 });
+
+test("check-key endpoint verifies the app key without calling paid APIs", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () => {
+    throw new Error("paid API must not be called");
+  };
+
+  const check = (key) =>
+    worker.fetch(
+      new Request("https://worker.example.com/api/check-key", {
+        method: "POST",
+        headers: { Origin: origin, "x-app-key": encodeURIComponent(key) },
+      }),
+      env()
+    );
+  assert.equal((await check(appKey)).status, 200);
+  assert.equal((await check("wrong-key")).status, 401);
+});
