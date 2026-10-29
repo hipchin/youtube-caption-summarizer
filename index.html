@@ -178,7 +178,7 @@
   }
 
   input[type="url"],
-  input[type="password"] {
+  #key-input {
     flex: 1 1 240px;
     min-width: 0;
     height: var(--control-touch);
@@ -192,7 +192,7 @@
   }
 
   input[type="url"]:focus-visible,
-  input[type="password"]:focus-visible {
+  #key-input:focus-visible {
     outline: 2px solid var(--color-focus);
     outline-offset: 1px;
     border-color: var(--color-focus);
@@ -580,7 +580,8 @@
     <div class="key-group" id="key-group" hidden>
       <label for="key-input">合言葉</label>
       <div class="input-row">
-        <input id="key-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <!-- type="password" だと iPhone で英数字キーボードしか出ず日本語を入力できないため text にする -->
+        <input id="key-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
       </div>
       <p class="hint">初回だけ入力します。取得に成功するとこの端末に保存されます。</p>
     </div>
@@ -884,7 +885,7 @@
       return;
     }
 
-    const key = loadKey() || keyInput.value.trim();
+    const key = loadKey() || keyInput.value.normalize("NFC").trim();
     if (!key) {
       showKeyField();
       showError("合言葉を入力してください。");
@@ -900,7 +901,8 @@
     try {
       const res = await fetch(WORKER_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-app-key": key },
+        // ヘッダーは ASCII しか送れないため、日本語の合言葉も通るよう encodeURIComponent する
+        headers: { "Content-Type": "application/json", "x-app-key": encodeURIComponent(key) },
         body: JSON.stringify({ url, mode }),
         signal: controller.signal,
       });

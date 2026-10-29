@@ -136,3 +136,18 @@ test("allows the app key header in CORS preflight", async () => {
   assert.equal(response.status, 204);
   assert.match(response.headers.get("Access-Control-Allow-Headers"), /x-app-key/);
 });
+
+test("accepts a Japanese app key sent URI-encoded", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url) =>
+    String(url).includes("openai")
+      ? Response.json({ choices: [{ message: { content: "ok" } }] })
+      : Response.json({ content: "ok", lang: "ja", availableLangs: ["ja"] });
+
+  const okEnv = { ...env(), APP_KEY: " にほんごの合言葉 " };
+  assert.equal((await worker.fetch(request("transcript", encodeURIComponent("にほんごの合言葉")), okEnv)).status, 200);
+  assert.equal((await worker.fetch(request("transcript", encodeURIComponent("ちがう合言葉")), okEnv)).status, 401);
+});

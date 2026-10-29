@@ -74,10 +74,24 @@ async function assertAppKey(request, env) {
   if (!env.APP_KEY) {
     throw new UserFacingError("サーバー設定に問題があります。", 503);
   }
-  const given = request.headers.get(APP_KEY_HEADER) || "";
-  if (!(await sameSecret(given, env.APP_KEY))) {
+  const given = normalizeKey(request.headers.get(APP_KEY_HEADER), true);
+  if (!(await sameSecret(given, normalizeKey(env.APP_KEY, false)))) {
     throw new UserFacingError("合言葉が違います。", 401);
   }
+}
+
+// 日本語の合言葉も使えるよう、画面側は encodeURIComponent してヘッダーに載せる(ヘッダーは ASCII しか送れない)。
+// ここで元に戻し、Unicode 正規化と前後の空白除去をそろえてから比べる。
+function normalizeKey(value, encoded) {
+  let s = value || "";
+  if (encoded) {
+    try {
+      s = decodeURIComponent(s);
+    } catch {
+      // 不正な % 表記はそのまま比べる(一致しないので拒否される)
+    }
+  }
+  return s.normalize("NFC").trim();
 }
 
 // 長さや一致した位置が処理時間に出ないよう、ハッシュ同士を定数時間で比べる
